@@ -1,0 +1,89 @@
+name: Auto Publish English Podcast to YouTube (Learn English Champs)
+
+on:
+  schedule:
+    # Runs daily at 12:00 PM UTC (5:30 PM IST)
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Target video duration in minutes (default: 30)'
+        required: false
+        default: '30'
+      dry_run:
+        description: 'Dry run (generate video and thumbnail without uploading to YouTube)'
+        type: boolean
+        required: false
+        default: false
+      topic:
+        description: 'Custom topic for English podcast episode (optional)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  publish-podcast-episode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+      GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+      YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+      YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+      YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install FFmpeg & System Fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-freefont-ttf
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Learn English Champs Automation Pipeline
+        run: |
+          echo "Starting Learn English Champs daily podcast generation..."
+          DURATION="${{ github.event.inputs.duration || '30' }}"
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          
+          TOPIC_FLAG=""
+          if [ -n "${{ github.event.inputs.topic }}" ]; then
+            TOPIC_FLAG="--topic \"${{ github.event.inputs.topic }}\""
+          fi
+
+          python auto_pipeline.py --duration "$DURATION" $DRY_RUN_FLAG $TOPIC_FLAG
+
+      - name: Commit published videos log
+        if: always()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add published_videos.json
+          if git diff --staged --quiet; then
+            echo "No changes to published_videos.json to commit."
+          else
+            git commit -m "chore: update published videos log [skip ci]"
+            git push origin master || git push origin main
+          fi

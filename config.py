@@ -1,4 +1,5 @@
 import os
+import sys
 
 # Project root directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,8 +24,28 @@ VIDEO_FPS = 30
 # Subtitle settings
 SUBTITLE_Y = 310          # Centered horizontally, at Y=310 (upper-center gap)
 SUBTITLE_FONT_SIZE = 52
-FONT_PATH = r"C:\Windows\Fonts\arialbd.ttf"
-FALLBACK_FONT_PATH = r"C:\Windows\Fonts\arial.ttf"
+
+# Cross-platform font discovery (Windows & Linux / GitHub Actions)
+FONT_CANDIDATES = [
+    r"C:\Windows\Fonts\arialbd.ttf",
+    r"C:\Windows\Fonts\segoeuib.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+]
+
+FONT_PATH = None
+for fc in FONT_CANDIDATES:
+    if os.path.exists(fc):
+        FONT_PATH = fc
+        break
+
+if not FONT_PATH:
+    FONT_PATH = "arial.ttf"
+
+FALLBACK_FONT_PATH = FONT_PATH
 
 # Colors (R, G, B, A)
 COLOR_TEXT_NORMAL = (255, 255, 255, 255)       # Crisp White

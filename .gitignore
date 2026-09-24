@@ -7,3 +7,5 @@ output/
 *.mp3
 .env
 .venv
+input/*
+!input/podcast_scene.png

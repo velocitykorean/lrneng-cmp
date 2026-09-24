@@ -58,10 +58,18 @@ def generate_thumbnail(image_path: str, title_1: str, title_2: str, hook: str, o
 
     font_path = config.FONT_PATH if os.path.exists(config.FONT_PATH) else config.FALLBACK_FONT_PATH
     badge_font = ImageFont.truetype(font_path, 30)
-    main_font = ImageFont.truetype(font_path, 98)   # Extra large, high-impact text
-    sub_font = ImageFont.truetype(font_path, 46)
     logo_bold = ImageFont.truetype(font_path, 32)
     logo_small = ImageFont.truetype(font_path, 16)
+
+    def get_fitted_font(text: str, base_size: int, max_w: int, min_s: int = 36):
+        font = ImageFont.truetype(font_path, base_size)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        if tw > max_w:
+            scale = max_w / float(tw)
+            adjusted_size = max(min_s, int(base_size * scale))
+            return ImageFont.truetype(font_path, adjusted_size)
+        return font
 
     # 2. Top Right Channel Branding Badge: LEARN ENGLISH CHAMPS
     logo_x, logo_y = 1550, 50
@@ -70,7 +78,7 @@ def generate_thumbnail(image_path: str, title_1: str, title_2: str, hook: str, o
     draw.ellipse((logo_x + 145, logo_y + 16, logo_x + 180, logo_y + 51), outline=(255, 255, 255, 220), width=3)
     draw.ellipse((logo_x + 154, logo_y + 25, logo_x + 171, logo_y + 42), fill=(0, 229, 255, 240))
 
-    # 3. Top Episode Badge Pill: • LEARN ENGLISH CHAMPS •
+    # 3. Top Episode Badge Pill: • LEARN ENGLISH CHAMPS EP. XX •
     badge_text = f"• LEARN ENGLISH CHAMPS EP. {ep_number:02d} •"
     bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
     bw = bbox[2] - bbox[0]
@@ -87,14 +95,17 @@ def generate_thumbnail(image_path: str, title_1: str, title_2: str, hook: str, o
     )
     draw.text((bx, by), badge_text, fill=(255, 255, 255), font=badge_font)
 
-    # 4. Main Title Line 1: Crisp Pure White (Extra Large)
-    draw_heavy_3d_text(draw, title_1.upper(), main_font, 960, 255, (255, 255, 255), stroke_width=9)
+    # 4. Main Title Line 1: Crisp Pure White (Dynamically fitted to max 820px)
+    font_t1 = get_fitted_font(title_1.upper(), base_size=98, max_w=820, min_s=48)
+    draw_heavy_3d_text(draw, title_1.upper(), font_t1, 960, 255, (255, 255, 255), stroke_width=9)
 
-    # 5. Main Title Line 2: Vibrant Electric Yellow (Extra Large)
-    draw_heavy_3d_text(draw, title_2.upper(), main_font, 960, 365, (255, 230, 0), stroke_width=9)
+    # 5. Main Title Line 2: Vibrant Electric Yellow (Dynamically fitted to max 820px)
+    font_t2 = get_fitted_font(title_2.upper(), base_size=98, max_w=820, min_s=48)
+    draw_heavy_3d_text(draw, title_2.upper(), font_t2, 960, 365, (255, 230, 0), stroke_width=9)
 
-    # 6. Hook Pill: Vibrant Cyan Pill with High-Contrast Navy Text
-    hb = draw.textbbox((0, 0), hook, font=sub_font)
+    # 6. Hook Pill: Vibrant Cyan Pill with High-Contrast Navy Text (Dynamically fitted to max 800px)
+    font_hook = get_fitted_font(hook, base_size=46, max_w=780, min_s=28)
+    hb = draw.textbbox((0, 0), hook, font=font_hook)
     hw = hb[2] - hb[0]
     hh = hb[3] - hb[1]
     hx = (config.VIDEO_WIDTH - hw) // 2
@@ -107,7 +118,7 @@ def generate_thumbnail(image_path: str, title_1: str, title_2: str, hook: str, o
         outline=(255, 255, 255, 240),
         width=3
     )
-    draw.text((hx, hy), hook, fill=(10, 25, 48), font=sub_font)
+    draw.text((hx, hy), hook, fill=(10, 25, 48), font=font_hook)
 
     thumb = Image.alpha_composite(thumb, overlay)
     thumb.convert("RGB").save(output_path, quality=95)

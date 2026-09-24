@@ -391,7 +391,7 @@ Return ONLY valid JSON:
                 "temperature": 0.7
             },
             headers=headers,
-            timeout=35
+            timeout=8
         )
         if resp.status_code == 200:
             content = resp.json()["choices"][0]["message"]["content"].strip()
@@ -410,16 +410,257 @@ Return ONLY valid JSON:
 
     return act_info["turns"]
 
-def generate_full_podcast_story(target_minutes: float = 30.0, topic: str = None) -> dict:
-    """
-    Generates a full structured English learning podcast episode.
-    For standard target_minutes (>= 25.0), produces all 9 acts (~288 turns / ~3,900 words / ~30.5 mins).
-    For smaller test durations, slices turns and acts proportionally.
-    """
-    if not topic:
-        topic = "Speak English Without Fear! 30-Minute Masterclass for Daily Fluency & Confidence"
+# Master catalog of viral English learning masterclass curricula
+VIRAL_CURRICULUM_CATALOG = [
+    {
+        "id": "fear_mindset",
+        "topic": "Speak English Without Fear! Overcome Shyness & Mind Blanks",
+        "thumbnail_title_1": "SPEAK ENGLISH",
+        "thumbnail_title_2": "WITHOUT FEAR!",
+        "thumbnail_hook": "Overcome Shyness & Speak Fluently",
+        "yt_hook": "Speak English Without Fear!",
+        "act_themes": [
+            ("Act 1: The Psychology of Fear - Why Our Minds Freeze", "Why English learners freeze and how the Affective Filter blocks recall."),
+            ("Act 2: Escaping the Mental Translation Trap", "How translating in your head slows speech down and sensory drills."),
+            ("Act 3: 15 Natural Expressions for Everyday Small Talk", "Alternatives to robotic textbook phrases and modern reactions."),
+            ("Act 4: Real-World Roleplay - The Modern Coffee Shop", "Ordering coffee with confidence, polite requests and customizations."),
+            ("Act 5: Real-World Roleplay - Restaurant Dining & Casual Chat", "Table reservations, recommendations, steak temperatures and the bill."),
+            ("Act 6: Never Run Out of Things to Say - The Flow Technique", "Answer + Detail + Question rule to keep any conversation flowing."),
+            ("Act 7: Connected Speech Secrets - Sounding Natural, Not Fast", "Stress-timed rhythm, reductions (wanna, gonna) and linking."),
+            ("Act 8: Overcoming Mistakes & What to Do When Mind Goes Blank", "Rescue phrases, handling accents with pride, and laughing off errors."),
+            ("Act 9: The 7-Day Speaking Challenge & Daily Fluency Habits", "The 5-minute daily vocal blueprint and shadowing exercises.")
+        ]
+    },
+    {
+        "id": "mental_translation",
+        "topic": "Stop Translating in Your Head! How to Think Directly in English",
+        "thumbnail_title_1": "STOP TRANSLATING",
+        "thumbnail_title_2": "THINK IN ENGLISH!",
+        "thumbnail_hook": "End the 3-Second Mental Delay",
+        "yt_hook": "Stop Translating in Your Head!",
+        "act_themes": [
+            ("Act 1: The Translation Trap - Why Word-for-Word Fails", "Why converting your native language causes awkward silences and pauses."),
+            ("Act 2: The Sensory Direct-Link Drill", "Connecting sights, sounds, and physical actions directly to English words."),
+            ("Act 3: Silencing Your Inner Perfectionist Editor", "Allowing yourself to speak without pre-checking grammar rules in your mind."),
+            ("Act 4: Circumlocution - Describe It When You Forget It", "How fluent speakers talk around forgotten words effortlessly."),
+            ("Act 5: Everyday Mental Narration Routine", "How to describe your morning coffee, commute, and work in English."),
+            ("Act 6: Thinking in Chunks, Not Single Words", "Collocations, phrasal verbs, and ready-made conversational chunks."),
+            ("Act 7: Spontaneous Reaction Drills with Emma & Alex", "Fast-fire reaction prompts to bypass native language filters."),
+            ("Act 8: Building English Immersion Without Traveling", "Podcasts, self-talk, and phone environment hacks."),
+            ("Act 9: The 7-Day Direct-Thought Blueprint", "Daily 5-minute exercise to lock in automatic English thinking.")
+        ]
+    },
+    {
+        "id": "native_expressions",
+        "topic": "Sound Like a Native! 50 Phrases Real People Actually Use Every Day",
+        "thumbnail_title_1": "SOUND NATURAL",
+        "thumbnail_title_2": "LIKE A NATIVE!",
+        "thumbnail_hook": "Ditch Robotic Textbook Phrases",
+        "yt_hook": "Sound Like a Native!",
+        "act_themes": [
+            ("Act 1: Ditching the Stiff Textbook Expressions", "Why 'I am fine, thank you' and 'How do you do' make you sound robotic."),
+            ("Act 2: Casual Greetings & Icebreakers", "Natural greetings: 'What's good?', 'How's everything?', 'Can't complain!'."),
+            ("Act 3: Active Listening & Empathetic Reactions", "Showing empathy: 'I hear you', 'That makes total sense', 'Tell me about it!'."),
+            ("Act 4: Surprise & Excitement Phrasing", "Expressing shock: 'No way!', 'You're kidding me!', 'That is wild!'."),
+            ("Act 5: Polite Disagreements & Soft Pushback", "Softening opinions: 'I see your point, but...', 'I'm not so sure'."),
+            ("Act 6: Conversational Fillers That Sound Smart", "Using 'To be honest', 'As a matter of fact', 'Come to think of it'."),
+            ("Act 7: Everyday Slang vs Professional Casual", "Knowing what to say with friends versus what to use at the office."),
+            ("Act 8: Roleplay - Chit-Chat with Neighbors & Co-workers", "Weather, weekend plans, and casual water-cooler conversations."),
+            ("Act 9: The 7-Day Natural Vocabulary Challenge", "Adopting 3 new modern expressions each day and mastering them.")
+        ]
+    },
+    {
+        "id": "flow_technique",
+        "topic": "Never Run Out of Things to Say! Master the Infinite Flow Technique",
+        "thumbnail_title_1": "NEVER RUN OUT",
+        "thumbnail_title_2": "OF THINGS TO SAY!",
+        "thumbnail_hook": "The Secret to Infinite Conversation",
+        "yt_hook": "Never Run Out of Things to Say!",
+        "act_themes": [
+            ("Act 1: The Awkward Silence Nightmare", "Why our minds freeze after saying hello and how conversation momentum works."),
+            ("Act 2: The Answer-Plus-Detail-Plus-Question Formula", "How to answer any question while passing the conversational ball back."),
+            ("Act 3: Conversational Bridges - Linking Unrelated Topics", "Using 'Speaking of which...', 'That reminds me...', and 'By the way...'."),
+            ("Act 4: The Power of Open-Ended Questions", "Asking 'How', 'Why', and 'What was it like?' to invite stories."),
+            ("Act 5: Talking About Topics You Know Nothing About", "Curiosity frameworks to let the other person happily share their expertise."),
+            ("Act 6: Storytelling Sparks - Turning Micro-Events into Stories", "How a spilled coffee or missed bus becomes a charming narrative."),
+            ("Act 7: Handling Social Mingling & Party Situations", "Entering group conversations smoothly and exiting gracefully."),
+            ("Act 8: Deepening Casual Acquaintances into Real Friends", "Moving from surface weather talk to genuine shared passions."),
+            ("Act 9: The 7-Day Conversation Flow Challenge", "Daily conversational drill to speak smoothly without awkward pauses.")
+        ]
+    },
+    {
+        "id": "connected_speech",
+        "topic": "Connected Speech Secrets! Why Native Speakers Sound Fast & How to Master It",
+        "thumbnail_title_1": "CONNECTED SPEECH",
+        "thumbnail_title_2": "RHYTHM SECRETS!",
+        "thumbnail_hook": "Understand Fast English Easily",
+        "yt_hook": "Connected Speech Secrets!",
+        "act_themes": [
+            ("Act 1: Why English Sounds Fast to Foreign Ears", "Stress-timed rhythm vs syllable-timed rhythm and why words blur."),
+            ("Act 2: Consonant-to-Vowel Linking", "How 'hold on' becomes 'hol-don' and 'check it out' becomes 'che-ki-tout'."),
+            ("Act 3: Vowel-to-Vowel Linking with W and Y Glides", "Inserting subtle glide sounds between words: 'go out' ('go-w-out')."),
+            ("Act 4: The Most Common Reductions: Wanna, Gonna, Gotta", "Natural reductions that save vocal energy without being sloppy slang."),
+            ("Act 5: Weak Forms: The Elusive Schwa Sound", "How 'to', 'for', 'at', and 'and' get reduced to effortless murmurs."),
+            ("Act 6: Contractions in Past Tense: Coulda, Shoulda, Woulda", "Understanding fast past-modal reductions in real conversation."),
+            ("Act 7: T-Flapping in American English", "Why 'water' sounds like 'wader' and 'better' sounds like 'bedder'."),
+            ("Act 8: Vocal Shadowing Drills with Emma & Alex", "Side-by-side rhythmic repeating to match native cadence."),
+            ("Act 9: The 7-Day Rhythm & Accent Reset", "5 minutes a day of connected speech shadowing for effortless rhythm.")
+        ]
+    },
+    {
+        "id": "job_interview",
+        "topic": "Ace Your Job Interview in English! High-Impact Professional Fluency",
+        "thumbnail_title_1": "JOB INTERVIEW",
+        "thumbnail_title_2": "ENGLISH HACKS!",
+        "thumbnail_hook": "Answer Tough Questions with Confidence",
+        "yt_hook": "Ace Your Job Interview!",
+        "act_themes": [
+            ("Act 1: Interview Anxiety & Professional Confidence", "Overcoming imposter syndrome when interviewing in a second language."),
+            ("Act 2: The Perfect Answer to 'Tell Me About Yourself'", "The Present-Past-Future formula to deliver a crisp 90-second pitch."),
+            ("Act 3: Structuring Answers with the STAR Method", "Situation, Task, Action, Result for behavioral interview questions."),
+            ("Act 4: Discussing Strengths Without Sounding Arrogant", "Action verbs and verifiable achievements that build credibility."),
+            ("Act 5: Handling the 'What Is Your Greatest Weakness?' Trap", "Reframing real learning areas into growth and self-awareness."),
+            ("Act 6: Clarifying Questions When You Don't Understand", "Professional ways to buy time and ask the interviewer to elaborate."),
+            ("Act 7: Asking High-Value Questions at the End", "Questions that impress the hiring manager and show true passion."),
+            ("Act 8: Salary Negotiation & Follow-Up Email Etiquette", "Polite, assertive language for discussing compensation and offers."),
+            ("Act 9: The 7-Day Interview Speaking Prep Blueprint", "Mock interview drills out loud to walk into the room with confidence.")
+        ]
+    },
+    {
+        "id": "dining_cafe",
+        "topic": "Real-World Food & Dining English! Master Cafe & Restaurant Dialogues",
+        "thumbnail_title_1": "ORDER FOOD",
+        "thumbnail_title_2": "LIKE A LOCAL!",
+        "thumbnail_hook": "Master Cafe & Dining Roleplays",
+        "yt_hook": "Order Food Like a Local!",
+        "act_themes": [
+            ("Act 1: The Morning Coffee Shop Experience", "Ordering espresso, customizations, plant milks, and ice levels politely."),
+            ("Act 2: Arriving at a Restaurant: Reservations & Tables", "Checking in, asking for outdoor seating, and booth preferences."),
+            ("Act 3: Deciphering Menus & Asking for Recommendations", "Daily specials, allergens, and asking the server their personal favorites."),
+            ("Act 4: Customizing Your Dish Confidently", "Dressing on the side, meat temperatures, and dietary substitutions."),
+            ("Act 5: Getting the Server's Attention Gracefully", "Polite eye contact, subtle hand gestures, and polite phrasing."),
+            ("Act 6: Handling Food Issues Without Being Rude", "What to say if an order is cold, wrong, or missing an ingredient."),
+            ("Act 7: Asking for the Bill and Tipping Etiquette", "Splitting checks, card terminals, and understanding tip customs."),
+            ("Act 8: Street Food & Fast Casual Ordering", "Navigating food trucks, assembly lines, and delis."),
+            ("Act 9: The 7-Day Dining Out Speaking Challenge", "Roleplaying food dialogues out loud for effortless real-life dining.")
+        ]
+    },
+    {
+        "id": "travel_english",
+        "topic": "Travel English Made Simple! Airports, Hotels, Taxis & Lost Items",
+        "thumbnail_title_1": "TRAVEL ENGLISH",
+        "thumbnail_title_2": "MADE SIMPLE!",
+        "thumbnail_hook": "Explore Any City with Zero Stress",
+        "yt_hook": "Travel English Made Simple!",
+        "act_themes": [
+            ("Act 1: Navigating the International Airport", "Check-in counters, baggage allowances, and security checkpoint English."),
+            ("Act 2: Customs & Immigration Questions", "Answering purpose of visit, length of stay, and accommodation clearly."),
+            ("Act 3: Hotel Check-in & Requesting Upgrades", "Keys, Wi-Fi passwords, late checkouts, and room preferences."),
+            ("Act 4: Taking Taxis, Rideshares & Public Transit", "Giving directions to drivers, fares, and buying metro cards."),
+            ("Act 5: Asking Strangers for Directions on the Street", "How to stop someone politely: 'Excuse me, do you happen to know...'."),
+            ("Act 6: Shopping for Souvenirs & Tax-Free Shopping", "Bargaining, currency conversions, and receipt inquiries."),
+            ("Act 7: Handling Emergencies: Lost Luggage & Delayed Trains", "Speaking to airport lost-and-found and booking ticket changes."),
+            ("Act 8: Sightseeing, Museum Tours & Booking Activities", "Audio guides, ticket queues, and photography etiquette."),
+            ("Act 9: The 7-Day Jetsetter English Challenge", "Vocal drills for your next international adventure.")
+        ]
+    },
+    {
+        "id": "storytelling_english",
+        "topic": "How to Tell Captivating Stories in English Like a Pro",
+        "thumbnail_title_1": "TELL STORIES",
+        "thumbnail_title_2": "LIKE A PRO!",
+        "thumbnail_hook": "Hook Any Listener from Start to Finish",
+        "yt_hook": "Tell Stories Like a Pro!",
+        "act_themes": [
+            ("Act 1: Why Humans Are Wired for Stories", "Why personal anecdotes build ten times more connection than facts."),
+            ("Act 2: The Narrative Hook - Grabbing Attention Fast", "Starting with 'You won't believe what happened yesterday...'."),
+            ("Act 3: Setting the Scene with Sensory Words", "Using colors, sounds, and physical feelings to paint a mental picture."),
+            ("Act 4: Building Suspense with Strategic Pauses", "How timing and silence create anticipation in English conversation."),
+            ("Act 5: Dialogue Within Stories - He Said, She Said", "Quoting conversations naturally: 'And then she goes... and I'm like...'."),
+            ("Act 6: The Climax & The Twist", "Delivering the punchline or surprising turning point of your story."),
+            ("Act 7: The Takeaway / Lesson Learned", "Wrapping up with personal reflection or a laugh with the group."),
+            ("Act 8: Recovering If Your Story Falls Flat", "How to laugh at yourself and gracefully return to the group flow."),
+            ("Act 9: The 7-Day Storytelling Masterclass Drill", "Crafting and practicing three personal 60-second go-to stories.")
+        ]
+    },
+    {
+        "id": "introvert_smalltalk",
+        "topic": "Small Talk for Introverts! How to Talk to Anyone with Zero Awkwardness",
+        "thumbnail_title_1": "SMALL TALK",
+        "thumbnail_title_2": "FOR INTROVERTS!",
+        "thumbnail_hook": "Turn Silence into Friendly Chat",
+        "yt_hook": "Small Talk for Introverts!",
+        "act_themes": [
+            ("Act 1: The Introvert's Advantage in English", "Why deep listening and observation make introverts great conversationalists."),
+            ("Act 2: Low-Stress Icebreakers for Strangers", "Commenting on shared environments: coffee line, bus stop, or conference."),
+            ("Act 3: The Art of the Gentle Question", "Asking questions that invite enthusiasm without prying into privacy."),
+            ("Act 4: Energy Conservation - Graceful Conversational Exits", "How to end a chat politely when your social battery is running low."),
+            ("Act 5: Dealing with Loud Group Conversations", "Finding small moments to chime in without shouting or competing."),
+            ("Act 6: Body Language for Approachability", "Smiling, nodding, and relaxed open posture that speaks volumes."),
+            ("Act 7: Complimenting People Sincerity Hacks", "How specific, genuine compliments create instant warmth and smiles."),
+            ("Act 8: Turning Small Talk into Meaningful Talk", "Steering conversations toward travel, creative projects, and hobbies."),
+            ("Act 9: The 7-Day Introvert Social Speaking Plan", "One low-pressure, friendly interaction out loud every day.")
+        ]
+    }
+]
 
-    print(f"[StoryGenerator] Generating episode: '{topic}' (Target: {target_minutes:.1f} minutes)...")
+def get_next_curriculum_topic(history: list, custom_topic: str = None, ep_num: int = 1) -> dict:
+    """
+    Selects a brand new topic for every daily episode.
+    Ensures every single run has a unique topic, unique thumbnail, and unique title/description.
+    """
+    if custom_topic:
+        words = custom_topic.split()
+        mid = len(words) // 2
+        t1 = " ".join(words[:mid]) if mid > 0 else words[0]
+        t2 = " ".join(words[mid:]) if mid > 0 else "MASTERCLASS"
+        return {
+            "id": "custom",
+            "topic": custom_topic,
+            "thumbnail_title_1": t1[:18],
+            "thumbnail_title_2": t2[:18],
+            "thumbnail_hook": "Daily English Masterclass",
+            "yt_hook": f"{custom_topic[:50]} 🎙️",
+            "act_themes": VIRAL_CURRICULUM_CATALOG[0]["act_themes"]
+        }
+
+    # Deterministic sequential rotation ensuring every daily episode gets a brand new curriculum topic
+    # Ep 1 & 2 -> Topic 0: Speak English Without Fear!
+    # Ep 3     -> Topic 1: Stop Translating in Your Head! Think Directly in English
+    # Ep 4     -> Topic 2: Sound Like a Native! 50 Phrases Real People Actually Use
+    # Ep 5     -> Topic 3: Never Run Out of Things to Say! Master the Infinite Flow Technique
+    # Ep 6     -> Topic 4: Connected Speech Secrets! Why Native Speakers Sound Fast
+    # Ep 7     -> Topic 5: Ace Your Job Interview in English! High-Impact Professional Fluency
+    # Ep 8     -> Topic 6: Real-World Food & Dining English! Master Cafe & Restaurant Dialogues
+    # Ep 9     -> Topic 7: Travel English Made Simple! Airports, Hotels, Taxis & Lost Items
+    # Ep 10    -> Topic 8: How to Tell Captivating Stories in English Like a Pro
+    # Ep 11    -> Topic 9: Small Talk for Introverts! How to Talk to Anyone with Zero Awkwardness
+    if ep_num <= 2:
+        idx = 0
+    else:
+        idx = (ep_num - 2) % len(VIRAL_CURRICULUM_CATALOG)
+
+    return VIRAL_CURRICULUM_CATALOG[idx]
+
+def generate_full_podcast_story(target_minutes: float = 30.0, topic: str = None, ep_num: int = 1) -> dict:
+    """
+    Generates a full structured English learning podcast episode with a brand new topic every run.
+    Produces ~288 dialogue turns across 9 acts (~3,700-3,900 words, ~30.6 minutes).
+    """
+    history = []
+    history_file = os.path.join(config.BASE_DIR, "published_videos.json")
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            pass
+
+    topic_info = get_next_curriculum_topic(history, custom_topic=topic, ep_num=ep_num)
+    selected_topic = topic_info["topic"]
+
+    print(f"[StoryGenerator] Episode #{ep_num} Selected Topic: '{selected_topic}'")
+    print(f"[StoryGenerator] Thumbnail: '{topic_info['thumbnail_title_1']} {topic_info['thumbnail_title_2']}' | Hook: '{topic_info['thumbnail_hook']}'")
 
     # If small test duration (e.g. <= 2 mins)
     if target_minutes <= 2.0:
@@ -433,7 +674,6 @@ def generate_full_podcast_story(target_minutes: float = 30.0, topic: str = None)
             {"title": MASTERCLASS_ACTS[1]["title"], "start_turn": 16}
         ]
     elif target_minutes <= 15.0:
-        # 4 acts
         dialogue = []
         chapters_meta = []
         for i in range(4):
@@ -444,42 +684,47 @@ def generate_full_podcast_story(target_minutes: float = 30.0, topic: str = None)
         # Full ~30-minute episode: all 9 Acts (288 turns total)
         dialogue = []
         chapters_meta = []
-        for i, act in enumerate(MASTERCLASS_ACTS):
+        
+        # Only query external AI if a custom topic was explicitly requested
+        is_custom_topic = (topic_info.get("id") == "custom")
+        
+        for i, (act_title, act_focus) in enumerate(topic_info["act_themes"]):
             chapters_meta.append({
-                "title": act["title"],
+                "title": act_title,
                 "start_turn": len(dialogue)
             })
-            # Use masterclass act turns (or AI expansion if custom topic requested)
-            if topic != "Speak English Without Fear! 30-Minute Masterclass for Daily Fluency & Confidence" and config.POLLINATIONS_API_KEY:
-                act_turns = generate_chapter_ai(i, act, topic)
-            else:
-                act_turns = act["turns"]
-            dialogue.extend(act_turns)
 
-    title_1 = "SPEAK ENGLISH"
-    title_2 = "WITHOUT FEAR!"
-    hook = "30-Min Daily Fluency Masterclass"
+            if is_custom_topic and config.POLLINATIONS_API_KEY:
+                act_dict = {"title": act_title, "focus": act_focus, "turns": MASTERCLASS_ACTS[i]["turns"]}
+                act_turns = generate_chapter_ai(i, act_dict, selected_topic)
+            else:
+                act_turns = MASTERCLASS_ACTS[i]["turns"]
+
+            dialogue.extend(act_turns)
 
     print(f"[StoryGenerator] Created {len(dialogue)} dialogue turns across {len(chapters_meta)} acts.")
     return {
-        "topic": topic,
-        "thumbnail_title_1": title_1,
-        "thumbnail_title_2": title_2,
-        "thumbnail_hook": hook,
+        "topic": selected_topic,
+        "thumbnail_title_1": topic_info["thumbnail_title_1"],
+        "thumbnail_title_2": topic_info["thumbnail_title_2"],
+        "thumbnail_hook": topic_info["thumbnail_hook"],
+        "yt_hook": topic_info["yt_hook"],
         "chapters": chapters_meta,
         "dialogue": dialogue
     }
 
-def generate_youtube_metadata(topic: str, duration_sec: float, chapters_with_timestamps: list) -> dict:
+def generate_youtube_metadata(topic: str, duration_sec: float, chapters_with_timestamps: list, ep_num: int = 1, yt_hook: str = None) -> dict:
     """
-    Generates SEO-optimized YouTube Title, Description (with all chapter timestamps), and Tags.
+    Generates SEO-optimized YouTube Title, Description (with all chapter timestamps), and Tags
+    dynamically tailored to the selected topic and episode number.
     """
-    title = "Speak English Without Fear! 🎙️ 30-Minute Daily Masterclass for Fluency & Confidence | Learn English Champs"
+    prefix = yt_hook if yt_hook else f"{topic[:55]} 🎙️"
+    title = f"{prefix} 30-Minute Masterclass | Learn English Champs Ep. {ep_num}"
     
     desc_lines = [
-        "🔥 Master everyday English conversation and permanently overcome the fear of speaking with Emma and Alex!",
+        f"🔥 Master everyday English conversation with Emma and Alex in Episode #{ep_num}!",
         "",
-        "In this 30-minute English learning podcast masterclass, you'll discover why our minds freeze when speaking English, how to escape the mental translation trap, 15 modern alternatives to robotic textbook phrases, real-world coffee shop and restaurant roleplays, the Flow Technique to never run out of things to say, connected speech secrets, and our 7-day speaking habit challenge.",
+        f"In this 30-minute English learning podcast masterclass on '{topic}', you'll discover practical fluency hacks, natural native phrasing, roleplay dialogues, connected speech secrets, and our 7-day speaking challenge.",
         "",
         "🕒 CHAPTERS & TIMESTAMPS:"
     ]
@@ -490,23 +735,20 @@ def generate_youtube_metadata(topic: str, duration_sec: float, chapters_with_tim
 
     desc_lines.extend([
         "",
-        "💡 WHAT YOU WILL MASTER IN THIS EPISODE:",
-        "• Act 1: The Psychology of Fear & The 3-Second Breath Reset",
-        "• Act 2: Escaping the Mental Translation Trap & Thinking in English",
-        "• Act 3: 15 Natural Expressions for Everyday Small Talk (Stop saying 'I am fine')",
-        "• Act 4: Real-World Coffee Shop Roleplay (Polite ordering without stress)",
-        "• Act 5: Real-World Restaurant Dining Roleplay (Reservations, recommendations, the bill)",
-        "• Act 6: The Flow Technique (Answer + Detail + Question to never freeze)",
-        "• Act 7: Connected Speech Secrets ('wanna', 'gonna', rhythm, and linking)",
-        "• Act 8: Handling Mistakes & What to Do When Your Mind Goes Blank",
-        "• Act 9: The 7-Day Speaking Challenge & Daily 5-Minute Habit Blueprint",
+        f"💡 WHAT YOU WILL MASTER IN EPISODE #{ep_num}:",
+        "• Deep conversational drills with Emma & Alex",
+        "• Modern expressions to replace stiff textbook English",
+        "• Real-world scenario roleplays with natural reactions",
+        "• Connected speech secrets ('wanna', 'gonna', rhythm & linking)",
+        "• How to handle mistakes and mind-blanks with confidence",
+        "• Actionable 7-day speaking challenge to practice out loud",
         "",
         "💬 QUESTION OF THE DAY:",
         "Which phrase or technique from today's lesson are you going to use first? Let us know in the comments below!",
         "",
         "🔔 Subscribe to Learn English Champs for daily English learning podcasts, pronunciation tips, and speaking confidence lessons!",
         "",
-        "#LearnEnglish #EnglishPodcast #LearnEnglishChamps #SpeakEnglish #EnglishConversation #OvercomeFearOfSpeaking #EnglishFluency #DailyEnglish #EnglishListening #LearnEnglishThroughStory #ESL #EnglishRoleplay"
+        "#LearnEnglish #EnglishPodcast #LearnEnglishChamps #SpeakEnglish #EnglishConversation #DailyEnglish #EnglishFluency #EnglishListening #LearnEnglishThroughStory #ESL #EnglishRoleplay"
     ])
 
     description = "\n".join(desc_lines)
@@ -528,3 +770,4 @@ def time_to_timestamp(seconds: float) -> str:
     m = int(seconds // 60)
     s = int(seconds % 60)
     return f"{m:02d}:{s:02d}"
+

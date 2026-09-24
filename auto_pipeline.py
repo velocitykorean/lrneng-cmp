@@ -65,7 +65,7 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
     # Step 2: Generate English Learning Dialogue & Chapters
     # ----------------------------------------------------
     print(f"\n[Step 2/6] Generating Podcast Dialogue (Target: {target_minutes:.1f} minutes)...")
-    story = generate_full_podcast_story(target_minutes=target_minutes, topic=topic)
+    story = generate_full_podcast_story(target_minutes=target_minutes, topic=topic, ep_num=ep_num)
     print(f"  Episode Topic: {story['topic']}")
     print(f"  Total Dialogue Turns: {len(story['dialogue'])}")
     print(f"  Chapters Planned: {len(story['chapters'])}")
@@ -130,7 +130,9 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
     yt_meta = generate_youtube_metadata(
         topic=story["topic"],
         duration_sec=total_duration,
-        chapters_with_timestamps=chapters_with_timestamps
+        chapters_with_timestamps=chapters_with_timestamps,
+        ep_num=ep_num,
+        yt_hook=story.get("yt_hook")
     )
 
     if dry_run:

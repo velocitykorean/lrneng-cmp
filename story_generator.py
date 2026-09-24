@@ -260,7 +260,7 @@ def generate_youtube_metadata(topic: str, duration_sec: float, chapters_with_tim
     """
     Generates SEO-optimized YouTube Title, Description (with chapter timestamps), and Tags.
     """
-    title = f"Speak English Without Fear! 🎙️ 30-Minute Masterclass for Daily Fluency | Learn English Champs"
+    title = f"Speak English Without Fear! | Daily Fluency Masterclass | Learn English Champs"
     
     desc_lines = [
         "🔥 Master everyday English conversation and overcome the fear of speaking with Emma and Alex!",

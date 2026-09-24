@@ -84,12 +84,10 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
     chapters_with_timestamps = []
     for ch in story["chapters"]:
         start_turn_idx = ch["start_turn"]
-        # Find start time of that turn in subtitle_chunks
         ch_time = 0.0
-        if start_turn_idx < len(story["dialogue"]):
-            # Find matching subtitle chunk
+        if start_turn_idx > 0 and start_turn_idx < len(story["dialogue"]):
             for chunk in subtitle_chunks:
-                if chunk.get("turn_idx", -1) == start_turn_idx or chunk["start"] >= ch_time:
+                if chunk.get("turn_idx", -1) == start_turn_idx:
                     ch_time = chunk["start"]
                     break
         chapters_with_timestamps.append({

@@ -38,30 +38,51 @@ async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
     return {
         "audio_segment": seg,
         "duration": dur_sec,
-        "words": words
+        "words": words,
+        "turn_index": turn_index
     }
 
-def chunk_turn_words(words: list, speaker: str, global_turn_offset: float, turn_duration: float, max_words_per_line: int = 5) -> list:
+def chunk_turn_words(words: list, speaker: str, global_turn_offset: float, turn_duration: float, max_words_per_line: int = 6) -> list:
     """
-    Chunks a turn's words into strictly single-line subtitle chunks (3 to 6 words each),
-    computing absolute start/end times and word boundaries.
+    Chunks a turn's words into strictly single-line subtitle chunks (optimum 5 to 6 words each, strictly never more than 6 words).
+    Ensures text remains strictly centered between the two speakers without overflowing horizontally.
     """
     if not words:
         return []
 
+    total_words = len(words)
     chunks = []
-    current_chunk_words = []
 
-    for w in words:
-        current_chunk_words.append(w)
-        # Check if we should split at punctuation or max words
-        has_punctuation = any(w["word"].endswith(p) for p in [".", ",", "!", "?", ";", ":"])
-        if len(current_chunk_words) >= max_words_per_line or (has_punctuation and len(current_chunk_words) >= 3):
-            chunks.append(current_chunk_words)
-            current_chunk_words = []
+    # If the sentence is already 6 words or fewer, keep it on a single line
+    if total_words <= max_words_per_line:
+        chunks = [words]
+    else:
+        current_chunk = []
+        for i, w in enumerate(words):
+            current_chunk.append(w)
+            remaining = len(words) - (i + 1)
+            has_punct = any(w["word"].endswith(p) for p in [".", ",", "!", "?", ";", ":"])
 
-    if current_chunk_words:
-        chunks.append(current_chunk_words)
+            # Break chunk when:
+            # 1. Hard cap reached (max 6 words)
+            # 2. Punctuation hit and chunk has >= 3 words and remaining >= 3 words
+            # 3. If remaining == 1 and current chunk already has 4 words, break to avoid 1-word dangling line
+            if len(current_chunk) >= max_words_per_line:
+                chunks.append(current_chunk)
+                current_chunk = []
+            elif len(current_chunk) >= 3 and has_punct and remaining >= 3:
+                chunks.append(current_chunk)
+                current_chunk = []
+            elif len(current_chunk) >= 4 and remaining == 1:
+                chunks.append(current_chunk)
+                current_chunk = []
+
+        if current_chunk:
+            # Rebalance if last chunk is a single lonely word
+            if len(current_chunk) == 1 and len(chunks) > 0 and len(chunks[-1]) >= 4:
+                borrowed = chunks[-1].pop()
+                current_chunk.insert(0, borrowed)
+            chunks.append(current_chunk)
 
     formatted_chunks = []
     for i, c_words in enumerate(chunks):
@@ -95,41 +116,54 @@ def chunk_turn_words(words: list, speaker: str, global_turn_offset: float, turn_
 
 async def generate_podcast_audio(dialogue: list) -> tuple:
     """
-    Generates realistic speech for all dialogue turns, concatenates with natural pauses,
-    and returns (master_audio_path, subtitle_chunks, total_duration).
+    Generates realistic speech for all dialogue turns concurrently using asyncio,
+    concatenates with natural pauses, and returns (master_audio_path, subtitle_chunks, total_duration).
     """
-    print(f"[TTS] Synthesizing speech for {len(dialogue)} dialogue turns...")
+    print(f"[TTS] Synthesizing speech for {len(dialogue)} dialogue turns in parallel...")
+    semaphore = asyncio.Semaphore(6)
+
+    async def worker(idx: int, turn: dict):
+        async with semaphore:
+            speaker = turn.get("speaker", "female").lower()
+            voice = config.VOICE_FEMALE if "female" in speaker else config.VOICE_MALE
+            text = turn.get("text", "").strip()
+            res = await synthesize_turn(text, voice, idx)
+            res["speaker"] = speaker
+            res["name"] = turn.get("name", "Host")
+            res["turn_text"] = text
+            if (idx + 1) % 25 == 0 or idx == len(dialogue) - 1:
+                print(f"  [TTS Progress] Synthesized {idx + 1}/{len(dialogue)} dialogue turns")
+            return idx, res
+
+    tasks = [worker(i, t) for i, t in enumerate(dialogue)]
+    results = await asyncio.gather(*tasks)
+    
+    # Sort back by original sequential dialogue index
+    results.sort(key=lambda x: x[0])
+    ordered_turns = [r[1] for r in results]
+
+    print(f"[TTS] All {len(ordered_turns)} turns synthesized! Assembling master audio track...")
     master_audio = AudioSegment.silent(duration=200) # Small 0.2s pre-roll silence
     current_offset = 0.2
-    
     all_chunks = []
 
-    for idx, turn in enumerate(dialogue):
-        speaker = turn.get("speaker", "female").lower()
-        voice = config.VOICE_FEMALE if "female" in speaker else config.VOICE_MALE
-        speaker_name = turn.get("name", "Host")
-        text = turn.get("text", "").strip()
-
-        print(f"  Turn {idx+1}/{len(dialogue)}: [{speaker_name}]: {text}")
-        turn_result = await synthesize_turn(text, voice, idx)
-        
-        # Append audio to master track
-        master_audio += turn_result["audio_segment"]
-        
-        # Calculate chunks for subtitle display
+    for idx, turn_res in enumerate(ordered_turns):
+        speaker = turn_res["speaker"]
         turn_chunks = chunk_turn_words(
-            turn_result["words"],
+            turn_res["words"],
             speaker=speaker,
             global_turn_offset=current_offset,
-            turn_duration=turn_result["duration"],
+            turn_duration=turn_res["duration"],
             max_words_per_line=config.MAX_WORDS_PER_LINE
         )
+        for c in turn_chunks:
+            c["turn_idx"] = idx
         all_chunks.extend(turn_chunks)
-        
-        current_offset += turn_result["duration"]
 
-        # Add pause between turns if not the final turn
-        if idx + 1 < len(dialogue):
+        master_audio += turn_res["audio_segment"]
+        current_offset += turn_res["duration"]
+
+        if idx + 1 < len(ordered_turns):
             pause_ms = int(config.PAUSE_BETWEEN_TURNS * 1000)
             master_audio += AudioSegment.silent(duration=pause_ms)
             current_offset += config.PAUSE_BETWEEN_TURNS
@@ -140,7 +174,7 @@ async def generate_podcast_audio(dialogue: list) -> tuple:
 
     master_audio_path = os.path.join(config.TEMP_DIR, "master_audio.wav")
     master_audio.export(master_audio_path, format="wav")
-    print(f"[TTS] Master audio saved: {master_audio_path} ({total_duration:.2f}s)")
+    print(f"[TTS] Master audio saved: {master_audio_path} ({total_duration:.2f}s / {total_duration/60.0:.1f} mins)")
 
     # Save chunks metadata
     timing_file = os.path.join(config.TEMP_DIR, "subtitles_chunks.json")

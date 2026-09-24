@@ -48,12 +48,21 @@ def render_podcast_video(image_path: str, audio_path: str, subtitle_chunks: list
     space_width = space_bbox[2] - space_bbox[0]
 
     # Pre-compute word dimensions for all chunks to maximize per-frame rendering speed
+    # Strictly ensure that no subtitle exceeds MAX_SUBTITLE_WIDTH (800px) so it never touches the characters
+    max_sub_w = getattr(config, "MAX_SUBTITLE_WIDTH", 800)
     processed_chunks = []
     for chunk in subtitle_chunks:
         c_words = chunk["words"]
+        if not c_words:
+            continue
+
+        chunk_font = sub_font
+        chunk_space_w = space_width
+        
+        # Test fit with standard font
         word_metrics = []
         for w in c_words:
-            wb = draw_base.textbbox((0, 0), w["word"], font=sub_font)
+            wb = draw_base.textbbox((0, 0), w["word"], font=chunk_font)
             w_w = wb[2] - wb[0]
             word_metrics.append({
                 "word": w["word"],
@@ -61,11 +70,34 @@ def render_podcast_video(image_path: str, audio_path: str, subtitle_chunks: list
                 "end": w["end"],
                 "width": w_w
             })
-        total_w = sum(wm["width"] for wm in word_metrics) + max(0, len(word_metrics) - 1) * space_width
+        total_w = sum(wm["width"] for wm in word_metrics) + max(0, len(word_metrics) - 1) * chunk_space_w
+
+        # If it exceeds maximum safe gap, dynamically downscale font size for this chunk
+        if total_w > max_sub_w:
+            scale = max_sub_w / float(total_w)
+            adjusted_size = max(28, int(config.SUBTITLE_FONT_SIZE * scale))
+            chunk_font = ImageFont.truetype(font_path, adjusted_size)
+            s_bbox = draw_base.textbbox((0, 0), " ", font=chunk_font)
+            chunk_space_w = s_bbox[2] - s_bbox[0]
+
+            word_metrics = []
+            for w in c_words:
+                wb = draw_base.textbbox((0, 0), w["word"], font=chunk_font)
+                w_w = wb[2] - wb[0]
+                word_metrics.append({
+                    "word": w["word"],
+                    "start": w["start"],
+                    "end": w["end"],
+                    "width": w_w
+                })
+            total_w = sum(wm["width"] for wm in word_metrics) + max(0, len(word_metrics) - 1) * chunk_space_w
+
         processed_chunks.append({
             "start": chunk["start"],
             "end": chunk["end"],
             "total_width": total_w,
+            "font": chunk_font,
+            "space_width": chunk_space_w,
             "words": word_metrics
         })
 
@@ -142,6 +174,9 @@ def render_podcast_video(image_path: str, audio_path: str, subtitle_chunks: list
                         if t >= w["end"]:
                             active_idx = idx
 
+                chunk_font = active_chunk.get("font", sub_font)
+                chunk_space_w = active_chunk.get("space_width", space_width)
+
                 for idx, w in enumerate(active_chunk["words"]):
                     # Highlight active word in Cyan (#00E5FF), others in White (#FFFFFF)
                     if idx == active_idx:
@@ -150,10 +185,10 @@ def render_podcast_video(image_path: str, audio_path: str, subtitle_chunks: list
                         color = (255, 255, 255)
 
                     # Soft drop shadow for legibility
-                    draw.text((curr_x + 2, sub_y + 2), w["word"], fill=(10, 15, 25), font=sub_font)
-                    draw.text((curr_x, sub_y), w["word"], fill=color, font=sub_font)
+                    draw.text((curr_x + 2, sub_y + 2), w["word"], fill=(10, 15, 25), font=chunk_font)
+                    draw.text((curr_x, sub_y), w["word"], fill=color, font=chunk_font)
 
-                    curr_x += w["width"] + space_width
+                    curr_x += w["width"] + chunk_space_w
 
             # Convert to BGR bytes and pipe to FFmpeg
             bgr_bytes = np.array(frame)[:, :, ::-1].tobytes()

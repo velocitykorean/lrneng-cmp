@@ -22,8 +22,9 @@ VIDEO_HEIGHT = 1080
 VIDEO_FPS = 30
 
 # Subtitle settings
-SUBTITLE_Y = 310          # Centered horizontally, at Y=310 (upper-center gap)
-SUBTITLE_FONT_SIZE = 52
+SUBTITLE_Y = 305          # Centered horizontally in the upper gap, Y=305
+SUBTITLE_FONT_SIZE = 46   # Optimum size to stay strictly between character heads
+MAX_SUBTITLE_WIDTH = 800  # Strict maximum width in pixels (stays within X=560 to 1360)
 
 # Cross-platform font discovery (Windows & Linux / GitHub Actions)
 FONT_CANDIDATES = [
@@ -69,7 +70,7 @@ TTS_RATE = "+0%"
 PAUSE_BETWEEN_TURNS = 0.45            # Natural conversational pause in seconds
 
 # Subtitle formatting
-MAX_WORDS_PER_LINE = 6                # Strictly single-line subtitles (3-6 words per chunk)
+MAX_WORDS_PER_LINE = 6                # Strictly single-line subtitles (max 6 words per line)
 
 # Pollinations AI settings
 POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "")

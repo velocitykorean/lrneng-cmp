@@ -168,8 +168,20 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
                 topic=story["topic"],
                 playlist_id=playlist_id
             )
-            print(f"\n[SUCCESS] Successfully published Episode #{ep_num} to YouTube!")
-            print(f"   URL: https://youtu.be/{video_id}")
+            # Facebook Upload
+            fb_video_id = None
+            try:
+                from publish_facebook import upload_to_facebook
+                print(f"\n[facebook] Uploading Episode #{ep_num} to Facebook Page Learn English Champs...")
+                fb_res = upload_to_facebook(
+                    video_path=video_path,
+                    title=yt_meta["title"],
+                    description=yt_meta["description"]
+                )
+                fb_video_id = fb_res.get("id")
+                print(f"[SUCCESS] Successfully published Episode #{ep_num} to Facebook! ID: {fb_video_id}")
+            except Exception as e_fb:
+                print(f"[FACEBOOK ERROR] Failed to upload to Facebook: {e_fb}")
         except Exception as e:
             print(f"[YOUTUBE ERROR] Failed to upload or update playlist: {e}")
             video_id = None

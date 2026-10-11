@@ -140,52 +140,57 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
         video_id = "DRY_RUN_ID"
         playlist_id = "DRY_RUN_PLAYLIST"
     else:
-        try:
-            yt = get_authenticated_youtube_service()
-            video_id = upload_to_youtube(
-                video_path=video_path,
-                title=yt_meta["title"],
-                description=yt_meta["description"],
-                tags=yt_meta["tags"],
-                category_id="27",
-                privacy_status="public"
-            )
-
-            # Set thumbnail
-            set_video_thumbnail(video_id, thumbnail_path)
-
-            # Add to 'Learn English' Playlist
-            playlist_id = get_or_create_playlist(yt, playlist_title="Learn English - Full Podcast Lessons")
-            if playlist_id:
-                add_video_to_playlist(yt, video_id, playlist_id)
-
-            # Log to history
-            log_published_video(
-                video_id=video_id,
-                title=yt_meta["title"],
-                image_name=image_path,
-                duration_sec=total_duration,
-                topic=story["topic"],
-                playlist_id=playlist_id
-            )
-            # Facebook Upload
-            fb_video_id = None
+        upload_yt = os.getenv("UPLOAD_YOUTUBE", "true").lower() not in ("false", "0", "no")
+        if not upload_yt:
+            print("\n[youtube] Alternate-day schedule: Skipping YouTube upload today (Facebook will still publish).")
+        else:
             try:
-                from publish_facebook import upload_to_facebook
-                print(f"\n[facebook] Uploading Episode #{ep_num} to Facebook Page Learn English Champs...")
-                fb_res = upload_to_facebook(
+                yt = get_authenticated_youtube_service()
+                video_id = upload_to_youtube(
                     video_path=video_path,
                     title=yt_meta["title"],
-                    description=yt_meta["description"]
+                    description=yt_meta["description"],
+                    tags=yt_meta["tags"],
+                    category_id="27",
+                    privacy_status="public"
                 )
-                fb_video_id = fb_res.get("id")
-                print(f"[SUCCESS] Successfully published Episode #{ep_num} to Facebook! ID: {fb_video_id}")
-            except Exception as e_fb:
-                print(f"[FACEBOOK ERROR] Failed to upload to Facebook: {e_fb}")
-        except Exception as e:
-            print(f"[YOUTUBE ERROR] Failed to upload or update playlist: {e}")
-            video_id = None
-            playlist_id = None
+
+                # Set thumbnail
+                set_video_thumbnail(video_id, thumbnail_path)
+
+                # Add to 'Learn English' Playlist
+                playlist_id = get_or_create_playlist(yt, playlist_title="Learn English - Full Podcast Lessons")
+                if playlist_id:
+                    add_video_to_playlist(yt, video_id, playlist_id)
+
+                # Log to history
+                log_published_video(
+                    video_id=video_id,
+                    title=yt_meta["title"],
+                    image_name=image_path,
+                    duration_sec=total_duration,
+                    topic=story["topic"],
+                    playlist_id=playlist_id
+                )
+            except Exception as e:
+                print(f"[YOUTUBE ERROR] Failed to upload or update playlist: {e}")
+                video_id = None
+                playlist_id = None
+
+        # Facebook Upload
+        fb_video_id = None
+        try:
+            from publish_facebook import upload_to_facebook
+            print(f"\n[facebook] Uploading Episode #{ep_num} to Facebook Page Learn English Champs...")
+            fb_res = upload_to_facebook(
+                video_path=video_path,
+                title=yt_meta["title"],
+                description=yt_meta["description"]
+            )
+            fb_video_id = fb_res.get("id")
+            print(f"[SUCCESS] Successfully published Episode #{ep_num} to Facebook! ID: {fb_video_id}")
+        except Exception as e_fb:
+            print(f"[FACEBOOK ERROR] Failed to upload to Facebook: {e_fb}")
 
     print("\n" + "=" * 70)
     print("                 PIPELINE RUN COMPLETE!")

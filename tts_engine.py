@@ -5,42 +5,67 @@ import edge_tts
 from pydub import AudioSegment
 import config
 
+def configure_edge_tts():
+    """Ensure edge_tts connects to Microsoft's active endpoint to avoid 403 on cloud runners."""
+    try:
+        import edge_tts.constants
+        import edge_tts.communicate
+        token = getattr(edge_tts.constants, "TRUSTED_CLIENT_TOKEN", "6A5AA1D4EAFF4E9FB37E23D68491D6F4")
+        new_url = (
+            "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
+            f"?Ocp-Apim-Subscription-Key={token}"
+        )
+        edge_tts.constants.WSS_URL = new_url
+        edge_tts.communicate.WSS_URL = new_url
+    except Exception:
+        pass
+
+
 async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
     """
     Synthesizes a single dialogue turn using edge_tts with WordBoundary tracking.
     """
-    comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
-    audio_data = bytearray()
-    words = []
-    
-    async for chunk in comm.stream():
-        if chunk["type"] == "audio":
-            audio_data.extend(chunk["data"])
-        elif chunk["type"] == "WordBoundary":
-            w_text = chunk["text"].strip()
-            start_s = chunk["offset"] / 10_000_000.0
-            dur_s = chunk["duration"] / 10_000_000.0
-            words.append({
-                "word": w_text,
-                "rel_start": start_s,
-                "rel_end": start_s + dur_s,
-                "duration": dur_s
-            })
+    configure_edge_tts()
+    last_err = None
+    for attempt in range(3):
+        try:
+            comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
+            audio_data = bytearray()
+            words = []
+            
+            async for chunk in comm.stream():
+                if chunk["type"] == "audio":
+                    audio_data.extend(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    w_text = chunk["text"].strip()
+                    start_s = chunk["offset"] / 10_000_000.0
+                    dur_s = chunk["duration"] / 10_000_000.0
+                    words.append({
+                        "word": w_text,
+                        "rel_start": start_s,
+                        "rel_end": start_s + dur_s,
+                        "duration": dur_s
+                    })
 
-    # Save temp turn audio
-    temp_turn_path = os.path.join(config.TEMP_DIR, f"turn_{turn_index}.mp3")
-    with open(temp_turn_path, "wb") as f:
-        f.write(audio_data)
+            if len(audio_data) > 0:
+                temp_turn_path = os.path.join(config.TEMP_DIR, f"turn_{turn_index}.mp3")
+                with open(temp_turn_path, "wb") as f:
+                    f.write(audio_data)
 
-    seg = AudioSegment.from_file(temp_turn_path)
-    dur_sec = len(seg) / 1000.0
+                seg = AudioSegment.from_file(temp_turn_path)
+                dur_sec = len(seg) / 1000.0
 
-    return {
-        "audio_segment": seg,
-        "duration": dur_sec,
-        "words": words,
-        "turn_index": turn_index
-    }
+                return {
+                    "audio_segment": seg,
+                    "duration": dur_sec,
+                    "words": words,
+                    "turn_index": turn_index
+                }
+        except Exception as e:
+            last_err = e
+            await asyncio.sleep(1)
+
+    raise RuntimeError(f"TTS synthesis failed for turn {turn_index}: {last_err}")
 
 def chunk_turn_words(words: list, speaker: str, global_turn_offset: float, turn_duration: float, max_words_per_line: int = 6) -> list:
     """

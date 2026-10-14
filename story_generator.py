@@ -8,6 +8,7 @@ Specifically tailored for:
 - Multi-chapter structure to reach 30 minutes (~288 turns / ~3,900 words) with YouTube chapter timestamps
 """
 import os
+import time
 import json
 import requests
 import config
@@ -357,58 +358,115 @@ MASTERCLASS_ACTS = [
     }
 ]
 
-def generate_chapter_ai(act_index: int, act_info: dict, topic_theme: str) -> list:
-    """Optional AI expansion using Pollinations AI if key is present and requested."""
+def generate_chapter_ai(act_index: int, act_title: str, act_focus: str, topic_theme: str, target_turns: int = 30) -> list:
+    """
+    Synthesizes authentic, high-quality dialogue turns for a specific act using AI.
+    Features retries, timeout management, and strict single-line subtitle length checks.
+    """
     key = config.POLLINATIONS_API_KEY
-    if not key:
-        return act_info["turns"]
+    endpoint = config.POLLINATIONS_ENDPOINT if key else config.POLLINATIONS_FALLBACK_ENDPOINT
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
 
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
-    prompt = f"""You are writing a script for 'Learn English Champs' podcast.
-Hosts: Emma (female) and Alex (male).
-Topic: {topic_theme}
-Act: {act_info['title']}
-Focus: {act_info['focus']}
+    prompt = f"""You are the lead scriptwriter for the popular English learning podcast 'Learn English Champs'.
+Hosts:
+- Emma (female): Energetic, warm American English coach, explains expressions, gives natural examples.
+- Alex (male): Curious, witty, relatable co-host, asks practical questions, tests phrases, reacts naturally.
 
-Requirements:
-- 28 to 32 dialogue turns alternating Emma and Alex.
-- Keep each line concise (10-18 words, max 6 words per phrase) for clean single-line subtitles.
-- Conversational, warm, educational, funny, encouraging.
-Return ONLY valid JSON:
+EPISODE TOPIC: {topic_theme}
+CHAPTER: {act_title}
+FOCUS AREA: {act_focus}
+
+TASK:
+Write exactly {target_turns} dialogue turns alternating strictly between Emma and Alex.
+Deeply explore the chapter focus with modern expressions, realistic scenario roleplays, and actionable fluency hacks.
+
+CRITICAL RULES:
+1. Alternate speaker every turn: Emma -> Alex -> Emma -> Alex...
+2. Keep each turn punchy (10-18 words, max 6 words per phrase) for clean single-line subtitle display.
+3. Keep the tone conversational, friendly, educational, and lively.
+4. Output ONLY a valid JSON array matching this schema (no markdown, no explanations):
 [
   {{"speaker": "female", "name": "Emma", "text": "..."}},
   {{"speaker": "male", "name": "Alex", "text": "..."}}
 ]"""
-    try:
-        resp = requests.post(
-            config.POLLINATIONS_ENDPOINT,
-            json={
-                "messages": [
-                    {"role": "system", "content": "You are a JSON-only API. Return only raw JSON arrays."},
-                    {"role": "user", "content": prompt}
-                ],
-                "model": config.POLLINATIONS_MODEL,
-                "temperature": 0.7
-            },
-            headers=headers,
-            timeout=8
-        )
-        if resp.status_code == 200:
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if content.startswith("```"):
-                lines = content.split("\n")
+
+    for attempt in range(3):
+        try:
+            print(f"[StoryGenerator] Synthesizing Act {act_index+1} dialogue with AI (attempt {attempt+1}/{3})...")
+            if key:
+                payload = {
+                    "model": config.POLLINATIONS_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are a professional educational podcast scriptwriter. Return ONLY a valid JSON array of dialogue objects."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.75
+                }
+                resp = requests.post(endpoint, json=payload, headers=headers, timeout=35)
+                if resp.status_code == 200:
+                    raw = resp.json()["choices"][0]["message"]["content"].strip()
+                else:
+                    raise RuntimeError(f"Pollinations API HTTP {resp.status_code}: {resp.text[:100]}")
+            else:
+                resp = requests.post(config.POLLINATIONS_FALLBACK_ENDPOINT, json={"messages": [{"role": "user", "content": prompt}]}, timeout=35)
+                if resp.status_code == 200:
+                    raw = resp.text.strip()
+                else:
+                    raise RuntimeError(f"Fallback endpoint HTTP {resp.status_code}")
+
+            if raw.startswith("```"):
+                lines = raw.split("\n")
                 if lines[0].startswith("```"):
                     lines = lines[1:]
                 if lines and lines[-1].startswith("```"):
                     lines = lines[:-1]
-                content = "\n".join(lines).strip()
-            parsed = json.loads(content)
-            if isinstance(parsed, list) and len(parsed) >= 20:
-                return parsed
-    except Exception as e:
-        print(f"[StoryGenerator] Note: AI call returned error ({e}), using masterclass script.")
+                raw = "\n".join(lines).strip()
 
-    return act_info["turns"]
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and len(parsed) >= 8:
+                print(f"[StoryGenerator] Act {act_index+1} successfully generated {len(parsed)} dialogue turns.")
+                return parsed
+            else:
+                print(f"[StoryGenerator] Act {act_index+1} response too short ({len(parsed) if isinstance(parsed, list) else 'not a list'}), retrying...")
+        except Exception as e:
+            print(f"[StoryGenerator] Act {act_index+1} AI attempt {attempt+1} error: {e}")
+            time.sleep(2)
+
+    print(f"[WARNING] AI generation failed for Act {act_index+1}. Using topic-specific fallback turns...")
+    return create_topic_fallback_turns(act_title, act_focus, topic_theme, target_turns)
+
+def create_topic_fallback_turns(act_title: str, act_focus: str, topic_theme: str, count: int = 30) -> list:
+    """Creates emergency fallback turns tailored specifically to the given topic and act if offline."""
+    base_pairs = [
+        ("Welcome back, everyone! In this part, we are focusing on " + act_title + ".",
+         "That's right, Emma. This is crucial for mastering " + topic_theme + "."),
+        ("Specifically, let's explore " + act_focus + ".",
+         "What is the most practical phrase our champs should practice first?"),
+        ("Start with clear, confident statements rather than second-guessing yourself.",
+         "I love that advice. Keeping it simple always beats sounding complicated."),
+        ("Always pay attention to how native speakers link their words smoothly.",
+         "Yes! Connected speech makes you sound natural without speaking too fast."),
+        ("Let's try a quick roleplay to put this directly into practice.",
+         "I'll play the speaker and you give me honest, real-time feedback."),
+        ("Notice the tone and cadence we use when delivering that phrase.",
+         "That felt so much more natural and comfortable than the textbook version."),
+        ("Remember, repetition out loud builds the muscle memory you need.",
+         "Practice these exact phrases in your daily conversations this week."),
+        ("Don't worry about being perfect; focus entirely on making a genuine connection.",
+         "Every single conversation is another victory on your fluency journey.")
+    ]
+    turns = []
+    while len(turns) < count:
+        for emma_text, alex_text in base_pairs:
+            turns.append({"speaker": "female", "name": "Emma", "text": emma_text})
+            if len(turns) >= count:
+                break
+            turns.append({"speaker": "male", "name": "Alex", "text": alex_text})
+            if len(turns) >= count:
+                break
+    return turns
 
 # Master catalog of viral English learning masterclass curricula
 VIRAL_CURRICULUM_CATALOG = [
@@ -604,6 +662,84 @@ VIRAL_CURRICULUM_CATALOG = [
     }
 ]
 
+def generate_dynamic_topic(past_topics: list, ep_num: int = 1) -> dict:
+    """Uses AI to generate a brand new viral English topic and 9 themed acts not present in history."""
+    key = config.POLLINATIONS_API_KEY
+    endpoint = config.POLLINATIONS_ENDPOINT if key else config.POLLINATIONS_FALLBACK_ENDPOINT
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+
+    prompt = f"""You are the creative executive producer for 'Learn English Champs', a top-rated English learning podcast.
+Previously published topics (DO NOT REPEAT OR CLOSELY COPY ANY OF THESE):
+{json.dumps(past_topics[-15:], indent=2)}
+
+Generate ONE brand new, highly practical, viral English learning episode topic that everyday learners need (e.g. handling customer service, negotiations, workplace meetings, doctor visits, humor and sarcasm, apartment hunting, networking, dating in English, arguing politely, emergency situations).
+
+OUTPUT FORMAT: Return ONLY a raw JSON object matching this schema:
+{{
+  "id": "slug_topic_name",
+  "topic": "Catchy Full Topic Title (e.g. Master English Phone Calls! Speak with Confidence)",
+  "thumbnail_title_1": "PHONE CALLS",
+  "thumbnail_title_2": "MADE EASY!",
+  "thumbnail_hook": "Never Fear Ringing Phones Again",
+  "yt_hook": "Master English Phone Calls!",
+  "act_themes": [
+    ["Act 1: Title", "Detailed focus description..."],
+    ["Act 2: Title", "Detailed focus description..."],
+    ["Act 3: Title", "Detailed focus description..."],
+    ["Act 4: Title", "Detailed focus description..."],
+    ["Act 5: Title", "Detailed focus description..."],
+    ["Act 6: Title", "Detailed focus description..."],
+    ["Act 7: Title", "Detailed focus description..."],
+    ["Act 8: Title", "Detailed focus description..."],
+    ["Act 9: Title", "Detailed focus description..."]
+  ]
+}}"""
+
+    for attempt in range(3):
+        try:
+            print(f"[StoryGenerator] Generating fresh dynamic curriculum topic via AI (attempt {attempt+1}/3)...")
+            if key:
+                resp = requests.post(
+                    endpoint,
+                    json={
+                        "model": config.POLLINATIONS_MODEL,
+                        "messages": [
+                            {"role": "system", "content": "You are a creative educational producer. Return ONLY valid JSON."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.85
+                    },
+                    headers=headers,
+                    timeout=30
+                )
+                if resp.status_code == 200:
+                    raw = resp.json()["choices"][0]["message"]["content"].strip()
+                else:
+                    raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:100]}")
+            else:
+                resp = requests.post(config.POLLINATIONS_FALLBACK_ENDPOINT, json={"messages": [{"role": "user", "content": prompt}]}, timeout=30)
+                raw = resp.text.strip()
+
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                raw = "\n".join(lines).strip()
+
+            data = json.loads(raw)
+            if "topic" in data and "act_themes" in data and len(data["act_themes"]) >= 6:
+                print(f"[StoryGenerator] Dynamically generated new topic: '{data['topic']}'")
+                return data
+        except Exception as e:
+            print(f"[StoryGenerator] Dynamic topic generation attempt {attempt+1} error: {e}")
+            time.sleep(2)
+
+    return VIRAL_CURRICULUM_CATALOG[ep_num % len(VIRAL_CURRICULUM_CATALOG)]
+
 def get_next_curriculum_topic(history: list, custom_topic: str = None, ep_num: int = 1) -> dict:
     """
     Selects a brand new topic for every daily episode.
@@ -614,38 +750,55 @@ def get_next_curriculum_topic(history: list, custom_topic: str = None, ep_num: i
         mid = len(words) // 2
         t1 = " ".join(words[:mid]) if mid > 0 else words[0]
         t2 = " ".join(words[mid:]) if mid > 0 else "MASTERCLASS"
+        default_acts = [
+            ("Act 1: Introduction & Core Mindset", f"Breaking down key concepts of {custom_topic}."),
+            ("Act 2: Real-World Scenario 1", "Practical roleplay and foundational expressions."),
+            ("Act 3: Modern Expressions", "Vocabulary and conversational phrases."),
+            ("Act 4: Overcoming Roadblocks", "Handling common difficulties and misconceptions."),
+            ("Act 5: Real-World Scenario 2", "Intermediate dialogue with native phrasing."),
+            ("Act 6: Connected Speech & Rhythm", "Pronunciation, linking, and natural flow."),
+            ("Act 7: Advanced Nuance", "Polite phrasing, subtle meanings, and humor."),
+            ("Act 8: Fast-Paced Roleplay Challenge", "Full back-and-forth conversational practice."),
+            ("Act 9: The 7-Day Speaking Blueprint", "Daily out-loud habit to master this skill.")
+        ]
         return {
             "id": "custom",
             "topic": custom_topic,
-            "thumbnail_title_1": t1[:18],
-            "thumbnail_title_2": t2[:18],
-            "thumbnail_hook": "Daily English Masterclass",
+            "thumbnail_title_1": t1[:18].upper(),
+            "thumbnail_title_2": t2[:18].upper(),
+            "thumbnail_hook": "Master Every Conversation",
             "yt_hook": f"{custom_topic[:50]} 🎙️",
-            "act_themes": VIRAL_CURRICULUM_CATALOG[0]["act_themes"]
+            "act_themes": default_acts
         }
 
-    # Deterministic sequential rotation ensuring every daily episode gets a brand new curriculum topic
-    # Ep 1 & 2 -> Topic 0: Speak English Without Fear!
-    # Ep 3     -> Topic 1: Stop Translating in Your Head! Think Directly in English
-    # Ep 4     -> Topic 2: Sound Like a Native! 50 Phrases Real People Actually Use
-    # Ep 5     -> Topic 3: Never Run Out of Things to Say! Master the Infinite Flow Technique
-    # Ep 6     -> Topic 4: Connected Speech Secrets! Why Native Speakers Sound Fast
-    # Ep 7     -> Topic 5: Ace Your Job Interview in English! High-Impact Professional Fluency
-    # Ep 8     -> Topic 6: Real-World Food & Dining English! Master Cafe & Restaurant Dialogues
-    # Ep 9     -> Topic 7: Travel English Made Simple! Airports, Hotels, Taxis & Lost Items
-    # Ep 10    -> Topic 8: How to Tell Captivating Stories in English Like a Pro
-    # Ep 11    -> Topic 9: Small Talk for Introverts! How to Talk to Anyone with Zero Awkwardness
-    if ep_num <= 2:
-        idx = 0
-    else:
-        idx = (ep_num - 2) % len(VIRAL_CURRICULUM_CATALOG)
+    # Extract all past published topics from history to prevent duplicate episodes
+    past_topics = []
+    if history:
+        for item in history:
+            if isinstance(item, dict) and "topic" in item:
+                past_topics.append(item["topic"].lower().strip())
 
-    return VIRAL_CURRICULUM_CATALOG[idx]
+    # Check if there are catalog topics that haven't been used yet
+    unused_catalog_topics = []
+    for cat in VIRAL_CURRICULUM_CATALOG:
+        cat_topic = cat["topic"].lower().strip()
+        already_used = any(cat_topic in pt or pt in cat_topic for pt in past_topics)
+        if not already_used:
+            unused_catalog_topics.append(cat)
+
+    if unused_catalog_topics:
+        selected = unused_catalog_topics[0]
+        print(f"[StoryGenerator] Selected unused catalog topic: '{selected['topic']}'")
+        return selected
+
+    # All catalog topics have already been published! Generate a brand new topic with AI
+    print("[StoryGenerator] All static catalog topics have been published. Generating fresh dynamic topic with AI...")
+    return generate_dynamic_topic(past_topics, ep_num=ep_num)
 
 def generate_full_podcast_story(target_minutes: float = 30.0, topic: str = None, ep_num: int = 1) -> dict:
     """
     Generates a full structured English learning podcast episode with a brand new topic every run.
-    Produces ~288 dialogue turns across 9 acts (~3,700-3,900 words, ~30.6 minutes).
+    Produces dialogue turns across all acts tailored specifically to the topic using AI.
     """
     history = []
     history_file = os.path.join(config.BASE_DIR, "published_videos.json")
@@ -662,45 +815,43 @@ def generate_full_podcast_story(target_minutes: float = 30.0, topic: str = None,
     print(f"[StoryGenerator] Episode #{ep_num} Selected Topic: '{selected_topic}'")
     print(f"[StoryGenerator] Thumbnail: '{topic_info['thumbnail_title_1']} {topic_info['thumbnail_title_2']}' | Hook: '{topic_info['thumbnail_hook']}'")
 
-    # If small test duration (e.g. <= 2 mins)
+    act_themes = topic_info.get("act_themes", [])
+    if not act_themes:
+        act_themes = VIRAL_CURRICULUM_CATALOG[0]["act_themes"]
+
+    dialogue = []
+    chapters_meta = []
+
+    # Configure acts and turn counts based on target duration
     if target_minutes <= 2.0:
-        act = MASTERCLASS_ACTS[0]
-        dialogue = act["turns"][:10]
-        chapters_meta = [{"title": act["title"], "start_turn": 0}]
+        # Quick test mode: 1 act, 10 turns
+        act_title, act_focus = act_themes[0]
+        chapters_meta.append({"title": act_title, "start_turn": 0})
+        turns = generate_chapter_ai(0, act_title, act_focus, selected_topic, target_turns=10)
+        dialogue.extend(turns)
     elif target_minutes <= 6.0:
-        dialogue = MASTERCLASS_ACTS[0]["turns"][:16] + MASTERCLASS_ACTS[1]["turns"][:16]
-        chapters_meta = [
-            {"title": MASTERCLASS_ACTS[0]["title"], "start_turn": 0},
-            {"title": MASTERCLASS_ACTS[1]["title"], "start_turn": 16}
-        ]
+        # Short podcast mode: 2 acts, 16 turns each
+        for i in range(min(2, len(act_themes))):
+            act_title, act_focus = act_themes[i]
+            chapters_meta.append({"title": act_title, "start_turn": len(dialogue)})
+            turns = generate_chapter_ai(i, act_title, act_focus, selected_topic, target_turns=16)
+            dialogue.extend(turns)
     elif target_minutes <= 15.0:
-        dialogue = []
-        chapters_meta = []
-        for i in range(4):
-            act = MASTERCLASS_ACTS[i]
-            chapters_meta.append({"title": act["title"], "start_turn": len(dialogue)})
-            dialogue.extend(act["turns"])
+        # Medium podcast: 4 acts, 22 turns each
+        for i in range(min(4, len(act_themes))):
+            act_title, act_focus = act_themes[i]
+            chapters_meta.append({"title": act_title, "start_turn": len(dialogue)})
+            turns = generate_chapter_ai(i, act_title, act_focus, selected_topic, target_turns=22)
+            dialogue.extend(turns)
     else:
-        # Full ~30-minute episode: all 9 Acts (288 turns total)
-        dialogue = []
-        chapters_meta = []
-        
-        # Only query external AI if a custom topic was explicitly requested
-        is_custom_topic = (topic_info.get("id") == "custom")
-        
-        for i, (act_title, act_focus) in enumerate(topic_info["act_themes"]):
+        # Full ~30-minute episode: all acts (~30 turns each for ~270-288 turns total)
+        for i, (act_title, act_focus) in enumerate(act_themes):
             chapters_meta.append({
                 "title": act_title,
                 "start_turn": len(dialogue)
             })
-
-            if is_custom_topic and config.POLLINATIONS_API_KEY:
-                act_dict = {"title": act_title, "focus": act_focus, "turns": MASTERCLASS_ACTS[i]["turns"]}
-                act_turns = generate_chapter_ai(i, act_dict, selected_topic)
-            else:
-                act_turns = MASTERCLASS_ACTS[i]["turns"]
-
-            dialogue.extend(act_turns)
+            turns = generate_chapter_ai(i, act_title, act_focus, selected_topic, target_turns=30)
+            dialogue.extend(turns)
 
     print(f"[StoryGenerator] Created {len(dialogue)} dialogue turns across {len(chapters_meta)} acts.")
     return {

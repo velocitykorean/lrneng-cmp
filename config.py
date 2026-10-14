@@ -1,5 +1,9 @@
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load local environment variables
+load_dotenv()
 
 # Project root directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -74,5 +78,6 @@ MAX_WORDS_PER_LINE = 6                # Strictly single-line subtitles (max 6 wo
 
 # Pollinations AI settings
 POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "")
-POLLINATIONS_ENDPOINT = "https://text.pollinations.ai/openai/chat/completions"
-POLLINATIONS_MODEL = "openai"
+POLLINATIONS_ENDPOINT = "https://gen.pollinations.ai/v1/chat/completions"
+POLLINATIONS_FALLBACK_ENDPOINT = "https://text.pollinations.ai/"
+POLLINATIONS_MODEL = "gemini-fast"

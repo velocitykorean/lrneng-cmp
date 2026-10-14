@@ -135,6 +135,9 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
         yt_hook=story.get("yt_hook")
     )
 
+    video_id = None
+    playlist_id = None
+
     if dry_run:
         print("[DRY RUN] Skipping YouTube upload. Video & thumbnail generated successfully!")
         video_id = "DRY_RUN_ID"

@@ -6,34 +6,45 @@ import edge_tts
 from pydub import AudioSegment
 import config
 
-def configure_edge_tts():
-    """Ensure edge_tts connects to Microsoft's active endpoint to avoid 403 on cloud runners."""
+EDGE_ENDPOINTS = [
+    "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4",
+    "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+]
+
+VOICE_FALLBACKS = {
+    "en-US-AvaNeural": ["en-US-EmmaNeural", "en-US-JennyNeural"],
+    "en-US-AndrewNeural": ["en-US-BrianNeural", "en-US-GuyNeural"]
+}
+
+def set_edge_tts_endpoint(url: str):
+    """Dynamically set the active Microsoft Edge TTS endpoint."""
     try:
         import edge_tts.constants
         import edge_tts.communicate
-        token = getattr(edge_tts.constants, "TRUSTED_CLIENT_TOKEN", "6A5AA1D4EAFF4E9FB37E23D68491D6F4")
-        new_url = (
-            "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
-            f"?Ocp-Apim-Subscription-Key={token}"
-        )
-        edge_tts.constants.WSS_URL = new_url
-        edge_tts.communicate.WSS_URL = new_url
+        edge_tts.constants.WSS_URL = url
+        edge_tts.communicate.WSS_URL = url
     except Exception:
         pass
 
 
 async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
     """
-    Synthesizes a single dialogue turn using edge_tts with WordBoundary tracking.
-    Features robust 429 rate-limit exponential backoff and automatic gTTS fallback.
+    Synthesizes a single dialogue turn using Microsoft Edge TTS with WordBoundary tracking.
+    Features multi-endpoint switching across Microsoft speech clusters, high-quality
+    Microsoft Neural voice fallbacks (zero robotic voices), and exponential backoff.
     """
-    configure_edge_tts()
+    candidate_voices = [voice] + VOICE_FALLBACKS.get(voice, [])
     last_err = None
     temp_turn_path = os.path.join(config.TEMP_DIR, f"turn_{turn_index}.mp3")
 
-    for attempt in range(5):
+    # 6 attempts cycling between 2 Microsoft endpoints and 3 Microsoft Neural voices
+    for attempt in range(6):
+        target_endpoint = EDGE_ENDPOINTS[attempt % len(EDGE_ENDPOINTS)]
+        target_voice = candidate_voices[(attempt // 2) % len(candidate_voices)]
+        set_edge_tts_endpoint(target_endpoint)
+
         try:
-            comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
+            comm = edge_tts.Communicate(text, target_voice, boundary="WordBoundary")
             audio_data = bytearray()
             words = []
             
@@ -67,24 +78,21 @@ async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
         except Exception as e:
             last_err = e
             err_str = str(e).lower()
+            endpoint_name = "Bing" if "bing" in target_endpoint else "MSEdge"
             if "429" in err_str or "rate" in err_str or "invalid response status" in err_str:
-                backoff = (2 ** attempt) * 1.5 + random.uniform(1.0, 3.0)
-                print(f"  [TTS RateLimit] Turn {turn_index} throttled (attempt {attempt+1}/5). Backing off for {backoff:.1f}s...")
+                backoff = (2 ** (attempt % 3)) * 1.5 + random.uniform(1.0, 2.5)
+                print(f"  [Edge TTS Throttled] Turn {turn_index} on {endpoint_name} (Voice: {target_voice}). Backing off {backoff:.1f}s and switching endpoint...")
                 await asyncio.sleep(backoff)
             else:
-                await asyncio.sleep(1.5)
+                print(f"  [Edge TTS Retry] Turn {turn_index} attempt {attempt+1}/6 error ({e}). Switching endpoint...")
+                await asyncio.sleep(1.0)
 
-    print(f"  [TTS Fallback] Edge TTS failed for turn {turn_index} after 5 attempts ({last_err}). Using fallback synthesis...")
-    try:
-        from gtts import gTTS
-        tts = gTTS(text=text, lang="en")
-        tts.save(temp_turn_path)
-        seg = AudioSegment.from_file(temp_turn_path)
-    except Exception as e_gtts:
-        words_count = len(text.split())
-        est_dur = max(2.0, words_count * 0.35)
-        seg = AudioSegment.silent(duration=int(est_dur * 1000))
-        seg.export(temp_turn_path, format="mp3")
+    # Emergency fallback only if all 6 Microsoft attempts on both endpoints failed
+    print(f"  [TTS Emergency] Edge TTS failed for turn {turn_index} across all Microsoft endpoints ({last_err}). Generating silent segment...")
+    words_count = len(text.split())
+    est_dur = max(2.0, words_count * 0.35)
+    seg = AudioSegment.silent(duration=int(est_dur * 1000))
+    seg.export(temp_turn_path, format="mp3")
 
     dur_sec = len(seg) / 1000.0
     words_list = text.split()

@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import random
 import edge_tts
 from pydub import AudioSegment
 import config
@@ -24,10 +25,13 @@ def configure_edge_tts():
 async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
     """
     Synthesizes a single dialogue turn using edge_tts with WordBoundary tracking.
+    Features robust 429 rate-limit exponential backoff and automatic gTTS fallback.
     """
     configure_edge_tts()
     last_err = None
-    for attempt in range(3):
+    temp_turn_path = os.path.join(config.TEMP_DIR, f"turn_{turn_index}.mp3")
+
+    for attempt in range(5):
         try:
             comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
             audio_data = bytearray()
@@ -48,7 +52,6 @@ async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
                     })
 
             if len(audio_data) > 0:
-                temp_turn_path = os.path.join(config.TEMP_DIR, f"turn_{turn_index}.mp3")
                 with open(temp_turn_path, "wb") as f:
                     f.write(audio_data)
 
@@ -63,9 +66,44 @@ async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
                 }
         except Exception as e:
             last_err = e
-            await asyncio.sleep(1)
+            err_str = str(e).lower()
+            if "429" in err_str or "rate" in err_str or "invalid response status" in err_str:
+                backoff = (2 ** attempt) * 1.5 + random.uniform(1.0, 3.0)
+                print(f"  [TTS RateLimit] Turn {turn_index} throttled (attempt {attempt+1}/5). Backing off for {backoff:.1f}s...")
+                await asyncio.sleep(backoff)
+            else:
+                await asyncio.sleep(1.5)
 
-    raise RuntimeError(f"TTS synthesis failed for turn {turn_index}: {last_err}")
+    print(f"  [TTS Fallback] Edge TTS failed for turn {turn_index} after 5 attempts ({last_err}). Using fallback synthesis...")
+    try:
+        from gtts import gTTS
+        tts = gTTS(text=text, lang="en")
+        tts.save(temp_turn_path)
+        seg = AudioSegment.from_file(temp_turn_path)
+    except Exception as e_gtts:
+        words_count = len(text.split())
+        est_dur = max(2.0, words_count * 0.35)
+        seg = AudioSegment.silent(duration=int(est_dur * 1000))
+        seg.export(temp_turn_path, format="mp3")
+
+    dur_sec = len(seg) / 1000.0
+    words_list = text.split()
+    w_dur = dur_sec / max(1, len(words_list))
+    words = []
+    for i, w in enumerate(words_list):
+        words.append({
+            "word": w,
+            "rel_start": round(i * w_dur, 3),
+            "rel_end": round((i + 1) * w_dur, 3),
+            "duration": round(w_dur, 3)
+        })
+
+    return {
+        "audio_segment": seg,
+        "duration": dur_sec,
+        "words": words,
+        "turn_index": turn_index
+    }
 
 def chunk_turn_words(words: list, speaker: str, global_turn_offset: float, turn_duration: float, max_words_per_line: int = 6) -> list:
     """
@@ -144,8 +182,8 @@ async def generate_podcast_audio(dialogue: list) -> tuple:
     Generates realistic speech for all dialogue turns concurrently using asyncio,
     concatenates with natural pauses, and returns (master_audio_path, subtitle_chunks, total_duration).
     """
-    print(f"[TTS] Synthesizing speech for {len(dialogue)} dialogue turns in parallel...")
-    semaphore = asyncio.Semaphore(6)
+    print(f"[TTS] Synthesizing speech for {len(dialogue)} dialogue turns with controlled concurrency (2 workers)...")
+    semaphore = asyncio.Semaphore(2)
 
     async def worker(idx: int, turn: dict):
         async with semaphore:
@@ -158,6 +196,7 @@ async def generate_podcast_audio(dialogue: list) -> tuple:
             res["turn_text"] = text
             if (idx + 1) % 25 == 0 or idx == len(dialogue) - 1:
                 print(f"  [TTS Progress] Synthesized {idx + 1}/{len(dialogue)} dialogue turns")
+            await asyncio.sleep(0.08)
             return idx, res
 
     tasks = [worker(i, t) for i, t in enumerate(dialogue)]

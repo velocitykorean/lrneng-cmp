@@ -11,11 +11,6 @@ EDGE_ENDPOINTS = [
     "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
 ]
 
-VOICE_FALLBACKS = {
-    "en-US-AvaNeural": ["en-US-EmmaNeural", "en-US-JennyNeural"],
-    "en-US-AndrewNeural": ["en-US-BrianNeural", "en-US-GuyNeural"]
-}
-
 def set_edge_tts_endpoint(url: str):
     """Dynamically set the active Microsoft Edge TTS endpoint."""
     try:
@@ -30,21 +25,19 @@ def set_edge_tts_endpoint(url: str):
 async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
     """
     Synthesizes a single dialogue turn using Microsoft Edge TTS with WordBoundary tracking.
-    Features multi-endpoint switching across Microsoft speech clusters, high-quality
-    Microsoft Neural voice fallbacks (zero robotic voices), and exponential backoff.
+    Uses the channel's 2 authentic host voices (Ava for Emma, Andrew for Andrew) with
+    multi-endpoint failover across Microsoft clusters and exponential backoff on 429.
     """
-    candidate_voices = [voice] + VOICE_FALLBACKS.get(voice, [])
     last_err = None
     temp_turn_path = os.path.join(config.TEMP_DIR, f"turn_{turn_index}.mp3")
 
-    # 6 attempts cycling between 2 Microsoft endpoints and 3 Microsoft Neural voices
-    for attempt in range(6):
+    # Cycle between the 2 Microsoft cloud endpoints on retries
+    for attempt in range(5):
         target_endpoint = EDGE_ENDPOINTS[attempt % len(EDGE_ENDPOINTS)]
-        target_voice = candidate_voices[(attempt // 2) % len(candidate_voices)]
         set_edge_tts_endpoint(target_endpoint)
 
         try:
-            comm = edge_tts.Communicate(text, target_voice, boundary="WordBoundary")
+            comm = edge_tts.Communicate(text, voice, boundary="WordBoundary")
             audio_data = bytearray()
             words = []
             
@@ -81,13 +74,13 @@ async def synthesize_turn(text: str, voice: str, turn_index: int) -> dict:
             endpoint_name = "Bing" if "bing" in target_endpoint else "MSEdge"
             if "429" in err_str or "rate" in err_str or "invalid response status" in err_str:
                 backoff = (2 ** (attempt % 3)) * 1.5 + random.uniform(1.0, 2.5)
-                print(f"  [Edge TTS Throttled] Turn {turn_index} on {endpoint_name} (Voice: {target_voice}). Backing off {backoff:.1f}s and switching endpoint...")
+                print(f"  [Edge TTS Throttled] Turn {turn_index} on {endpoint_name} (Voice: {voice}). Backing off {backoff:.1f}s and switching endpoint...")
                 await asyncio.sleep(backoff)
             else:
-                print(f"  [Edge TTS Retry] Turn {turn_index} attempt {attempt+1}/6 error ({e}). Switching endpoint...")
+                print(f"  [Edge TTS Retry] Turn {turn_index} attempt {attempt+1}/5 error ({e}). Switching endpoint...")
                 await asyncio.sleep(1.0)
 
-    # Emergency fallback only if all 6 Microsoft attempts on both endpoints failed
+    # Emergency fallback only if all 5 Microsoft attempts on both endpoints failed
     print(f"  [TTS Emergency] Edge TTS failed for turn {turn_index} across all Microsoft endpoints ({last_err}). Generating silent segment...")
     words_count = len(text.split())
     est_dur = max(2.0, words_count * 0.35)

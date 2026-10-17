@@ -166,15 +166,7 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
                 if playlist_id:
                     add_video_to_playlist(yt, video_id, playlist_id)
 
-                # Log to history
-                log_published_video(
-                    video_id=video_id,
-                    title=yt_meta["title"],
-                    image_name=image_path,
-                    duration_sec=total_duration,
-                    topic=story["topic"],
-                    playlist_id=playlist_id
-                )
+                print(f"[YOUTUBE] Successfully uploaded video ID: {video_id}")
             except Exception as e:
                 print(f"[YOUTUBE ERROR] Failed to upload or update playlist: {e}")
                 video_id = None
@@ -194,6 +186,17 @@ def run_auto_pipeline(target_minutes: float = 30.0, topic: str = None, dry_run: 
             print(f"[SUCCESS] Successfully published Episode #{ep_num} to Facebook! ID: {fb_video_id}")
         except Exception as e_fb:
             print(f"[FACEBOOK ERROR] Failed to upload to Facebook: {e_fb}")
+
+        # Log to history
+        log_published_video(
+            video_id=video_id,
+            title=yt_meta["title"],
+            image_name=image_path,
+            duration_sec=total_duration,
+            topic=story["topic"],
+            playlist_id=playlist_id,
+            facebook_id=fb_video_id
+        )
 
     print("\n" + "=" * 70)
     print("                 PIPELINE RUN COMPLETE!")

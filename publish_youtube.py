@@ -166,7 +166,7 @@ def set_video_thumbnail(video_id: str, thumbnail_path: str) -> bool:
         print(f"[YOUTUBE] Failed to set thumbnail: {e}")
         return False
 
-def log_published_video(video_id: str, title: str, image_name: str, duration_sec: float, topic: str, playlist_id: str = None):
+def log_published_video(video_id: str, title: str, image_name: str, duration_sec: float, topic: str, playlist_id: str = None, facebook_id: str = None):
     """Logs the published video to published_videos.json for history and weighted selection."""
     log_data = []
     if os.path.exists(PUBLISHED_LOG):
@@ -176,6 +176,8 @@ def log_published_video(video_id: str, title: str, image_name: str, duration_sec
         except Exception:
             log_data = []
 
+    fb_page_id = (os.getenv('FB_PAGE_ID') or os.getenv('FACEBOOK_PAGE_ID') or os.getenv('LEARN_ENGLISH_FB_PAGE_ID', '')).strip()
+
     log_data.append({
         "video_id": video_id,
         "title": title,
@@ -183,10 +185,13 @@ def log_published_video(video_id: str, title: str, image_name: str, duration_sec
         "duration_seconds": round(duration_sec, 2),
         "topic": topic,
         "playlist_id": playlist_id,
+        "facebook_id": facebook_id,
+        "facebook_url": f"https://www.facebook.com/{fb_page_id}/videos/{facebook_id}" if (facebook_id and fb_page_id) else (f"https://www.facebook.com/videos/{facebook_id}" if facebook_id else None),
         "timestamp": datetime.now().isoformat(),
-        "url": f"https://youtu.be/{video_id}"
+        "url": f"https://youtu.be/{video_id}" if video_id else None
     })
 
     with open(PUBLISHED_LOG, "w", encoding="utf-8") as f:
         json.dump(log_data, f, indent=2, ensure_ascii=False)
     print(f"[LOG] Appended publication log to {PUBLISHED_LOG}")
+
